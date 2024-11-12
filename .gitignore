@@ -1,0 +1,35 @@
+# Ignore Python bytecode files
+*.pyc
+*.pyo
+__pycache__/
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+env.bak/
+venv.bak/
+
+# Ignore .IDE and .editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore test and coverage reports
+*.log
+*.pot
+*.pyc
+
+# Ignore distribution / packaging files
+*.egg
+*.egg-info/
+dist/
+build/
+*.manifest
+*.spec
+
+# Ignore any specific configurations
+*.env
+*.ini
+*.sqlite3
