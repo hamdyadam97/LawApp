@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import permissions, status, serializers
 from rest_framework.exceptions import NotFound, APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, ListCreateAPIView, CreateAPIView, ListAPIView, \
-    RetrieveAPIView
+    RetrieveAPIView, UpdateAPIView, DestroyAPIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,7 +11,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from Office.models import LegalDocument, Case
 from Office.serializers import LegalDocumentSerializer, CaseDateSerializer, CaseSerializer, ClientSerializer
 from User.models import User
-from User.permission import AdminRequiredPermission, LawyerRequiredPermission, IsSuperUser
+from User.permission import AdminRequiredPermission, LawyerRequiredPermission, IsSuperUser, UserRequiredPermission
 from User.serializers import UserProfileSerializer, UserSerializer, LawyerSerializer, LoginSerializer, \
     UserDetailsSerializer
 
@@ -31,22 +31,121 @@ class AdminProfileCreate(CreateAPIView):
 
         return self.create(request, *args, **kwargs)
 
-# Admin Profile View (Retrieve and Update Admin)
-class AdminProfileView(RetrieveUpdateDestroyAPIView):
+
+class AdminUserProfileCreate(CreateAPIView):
+    permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email', '')
+        if User.objects.filter(email__iexact=email).exists():
+            return Response({'detail': 'User with this email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return self.create(request, *args, **kwargs)
+
+
+class UserProfileCreate(CreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserProfileSerializer
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email', '')
+        if User.objects.filter(email__iexact=email).exists():
+            return Response({'detail': 'User with this email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return self.create(request, *args, **kwargs)
+
+
+class AdminProfileView(RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
     serializer_class = UserProfileSerializer
 
     def get_object(self):
         # If the user is an admin, the object is the admin's profile (request.user)
-        user_id = self.request.query_params.get('id')
-        if self.request.user.user_type == 'admin' and not user_id :
             return self.request.user
 
-        # If it's a user or a lawyer, we need to fetch the object based on the provided ID
+class LawyerUserProfileView(RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
+    serializer_class = UserProfileSerializer
 
-        if not user_id:
+    def get_object(self):
+        request_id = self.kwargs.get("id")
+        # If the user is an admin, the object is the admin's profile (request.user)
+        user = User.objects.get(id=request_id)
+        return user
 
-            raise NotFound('User ID must be provided for user/lawyer.')
+class UserProfileView(RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated, UserRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+        # If the user is an admin, the object is the admin's profile (request.user)
+            return self.request.user
+
+
+class LawyerProfileView(RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated, LawyerRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+        # If the user is an admin, the object is the admin's profile (request.user)
+            return self.request.user
+
+
+class AdminUpdateProfileView(UpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+            return self.request.user
+
+
+class LawyerUpdateProfileView(UpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated, LawyerRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+            return self.request.user
+
+
+class UserUpdateProfileView(UpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated, UserRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+            return self.request.user
+
+class AdminUserUpdateProfileView(UpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+        user_id = self.kwargs['id']
+        try:
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise NotFound('User not found.')
+
+
+class AdminUserGetProfileView(RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated, UserRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+        user_id = self.kwargs['id']
+        try:
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise NotFound('User not found.')
+
+
+
+class AdminUserDeleteProfileView(DestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated, AdminRequiredPermission]
+    serializer_class = UserProfileSerializer
+
+    def get_object(self):
+        user_id = self.kwargs['id']
         try:
             return User.objects.get(id=user_id)
         except User.DoesNotExist:
@@ -93,6 +192,15 @@ class UserProfileView(RetrieveUpdateDestroyAPIView):
 class LawyerDocumentListView(ListAPIView):
     serializer_class = LegalDocumentSerializer
     permission_classes = [permissions.IsAuthenticated, LawyerRequiredPermission]
+
+    def get_queryset(self):
+        # Filter documents by the current user's ID
+        return LegalDocument.objects.filter(admin_id=self.request.user.id)
+
+
+class UserDocumentListView(ListAPIView):
+    serializer_class = LegalDocumentSerializer
+    permission_classes = [permissions.IsAuthenticated, UserRequiredPermission]
 
     def get_queryset(self):
         # Filter documents by the current user's ID
@@ -168,3 +276,4 @@ class AdminProfileCreate(APIView):
             }, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+

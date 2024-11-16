@@ -33,6 +33,22 @@ class LawyerRequiredPermission(IsAuthenticated):
                 return False
 
 
+class UserRequiredPermission(IsAuthenticated):
+    """
+    Custom permission to allow only Admins.
+    """
+    def has_permission(self, request, view):
+            # Ensure the user is authenticated and is an instance of AdminUser
+            is_authenticated = super().has_permission(request, view)
+
+            # Try retrieving the AdminUser instance
+            try:
+                return is_authenticated and request.user.user_type == 'user'
+            except User.DoesNotExist:
+                return False
+
+
+
 class IsSuperUser(IsAuthenticated):
     """
     Custom permission to allow access only to superuser accounts.

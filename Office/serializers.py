@@ -16,12 +16,13 @@ class RequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+
 # Serializer for Case model
 class CaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Case
         fields = [
-            'id', 'status', 'plaintiff_name', 'defendant', 'address', 'case_type', 'description',
+            'id', 'status', 'plaintiff_name', 'address', 'case_type', 'description',
             'date', 'time', 'notes', 'user', 'lawyer', 'office'
         ]
         read_only_fields = ['id', 'office', 'user']

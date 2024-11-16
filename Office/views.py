@@ -2,20 +2,22 @@ import logging
 
 from django.http import Http404
 from rest_framework.exceptions import NotFound
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView, ListAPIView
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView, ListAPIView, \
+    get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
 from Office.models import Request, LegalDocument, Case, Document, Office
 from Office.serializers import RequestSerializer, LegalDocumentSerializer, DocumentSerializer, CaseDateCreateSerializer, \
-    LawyerRequestSerializer, CaseDateUpdateSerializer, RequestDateUpdateSerializer
+    LawyerRequestSerializer, CaseDateUpdateSerializer, RequestDateUpdateSerializer, CaseSerializer
+from User.models import User
 
-from User.permission import AdminRequiredPermission, LawyerRequiredPermission
+from User.permission import AdminRequiredPermission, LawyerRequiredPermission, UserRequiredPermission
 from User.serializers import OfficeSerializer
-from .utils import handle_document_upload
+from .utils import handle_document_upload, NotificationService
 
 
-class RequestListCreateView(ListCreateAPIView):
+class RequestListView(ListAPIView):
     permission_classes = [IsAuthenticated, AdminRequiredPermission]
     serializer_class = RequestSerializer
 
@@ -23,6 +25,23 @@ class RequestListCreateView(ListCreateAPIView):
         # Filter requests by the current admin's office
         return Request.objects.filter(office_id=self.request.user.office_id)
 
+
+class RequestCreateView(ListAPIView):
+    permission_classes = [IsAuthenticated, AdminRequiredPermission]
+    serializer_class = RequestSerializer
+
+    def get_queryset(self):
+        # Filter requests by the current admin's office
+        return Request.objects.filter(office_id=self.request.user.office_id)
+
+
+class RequestUserCreateView(ListAPIView):
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+    serializer_class = RequestSerializer
+
+    def get_queryset(self):
+        # Filter requests by the current admin's office
+        return Request.objects.filter(office_id=self.request.user.office_id)
 
 class RequestDetailView(RetrieveUpdateDestroyAPIView):
     queryset = Request.objects.all()
@@ -39,6 +58,21 @@ class RequestDetailView(RetrieveUpdateDestroyAPIView):
         except Request.DoesNotExist:
             raise NotFound("Request not found")
 
+
+class LawyerRequestDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = Request.objects.all()
+    serializer_class = RequestSerializer
+    permission_classes = [IsAuthenticated, LawyerRequiredPermission]  # Only authenticated admins can access
+
+    def get_object(self):
+        request_id = self.kwargs.get("request_id")
+        try:
+            req = Request.objects.get(id=request_id)
+            if req.office_id != self.request.user.office_id:  # Check that office matches
+                raise NotFound("Request not found")
+            return req
+        except Request.DoesNotExist:
+            raise NotFound("Request not found")
 
 class LegalDocumentListCreateView(ListCreateAPIView):
     permission_classes = [IsAuthenticated, AdminRequiredPermission]
@@ -383,3 +417,139 @@ class RequestDetailsAPIView(APIView):
         result = RequestSerializer(request_obj).data
         result['office'] = OfficeSerializer(office).data  # Adding office data manually since it's related
         return Response(result, status=status.HTTP_200_OK)
+
+
+class UserDatesAPIView(APIView):
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        cases = user.cases.all()  # Assuming `cases` is the related name for User's cases
+        cases_date = [
+            {
+                "id": case.id,
+                "lawyer": case.lawyer.id,  # Assuming `lawyer` is a ForeignKey
+                "case_type": case.case_type,
+                "date": case.date,
+                "time": case.time,
+            }
+            for case in cases
+        ]
+        return Response(cases_date)
+
+
+class LawyerDatesAPIView(APIView):
+    permission_classes = [IsAuthenticated, LawyerRequiredPermission]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        cases = user.cases.all()  # Assuming `cases` is the related name for User's cases
+        cases_date = [
+            {
+                "id": case.id,
+                "lawyer": case.lawyer.id,  # Assuming `lawyer` is a ForeignKey
+                "case_type": case.case_type,
+                "date": case.date,
+                "time": case.time,
+            }
+            for case in cases
+        ]
+        return Response(cases_date)
+
+
+class CaseDetailsView(APIView):
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+
+    def get(self, request, case_id, *args, **kwargs):
+        # Fetch the case and ensure it belongs to the logged-in user
+        case = get_object_or_404(Case, id=case_id, user_id=request.user.id)
+
+        # Fetch related lawyer and office objects
+        lawyer = User.objects.filter(id=case.lawyer_id).first()
+        office = Office.objects.filter(id=case.office_id).first()
+
+        # Prepare the response data
+        case_details = {
+            "id": case.id,
+            "status": case.status,
+            "plaintiff_name": case.plaintiff_name,
+            "defendant_name": case.defendant,
+            "case_type": case.case_type,
+            "lawyer": {
+                "id": lawyer.id,
+                "name": lawyer.username,
+                "email": lawyer.email,
+            } if lawyer else None,
+            "office": {
+                "id": office.id,
+                "name": office.office_name,
+                "address": office.address,
+            } if office else None,
+            "notes": case.notes,
+            "dates": [{
+                "date": case.date,
+                "time": case.time
+            }]
+        }
+
+        return Response(case_details)
+
+
+class UserCasesView(ListAPIView):
+    serializer_class = CaseSerializer
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+
+    def get_queryset(self):
+        # Return cases associated with the authenticated user
+        return Case.objects.filter(user_id=self.request.user.id)
+
+class LawyerCasesView(ListAPIView):
+    serializer_class = CaseSerializer
+    permission_classes = [IsAuthenticated, LawyerRequiredPermission]
+
+    def get_queryset(self):
+        # Return cases associated with the authenticated user
+        return Case.objects.filter(user_id=self.request.user.id)
+
+
+class UserDocumentsView(APIView):
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+
+    def get(self, request, *args, **kwargs):
+        # Query for documents associated with the user's cases or requests
+        case_ids = Case.objects.filter(user_id=request.user.id).values_list('id', flat=True)
+        request_ids = Request.objects.filter(user_id=request.user.id).values_list('id', flat=True)
+        documents = Document.objects.filter(
+            Q(case_id__in=case_ids) | Q(request_id__in=request_ids)
+        )
+
+        # Serialize the documents
+        serializer = DocumentSerializer(documents, many=True)
+        return Response(serializer.data)
+
+
+class CaseDocumentsView(APIView):
+    permission_classes = [IsAuthenticated, UserRequiredPermission]
+
+    def get(self, request, case_id, *args, **kwargs):
+        # Ensure the case exists and belongs to the authenticated user
+        case = get_object_or_404(Case, id=case_id, user_id=request.user.id)
+
+        # Retrieve documents associated with the case
+        case_documents = case.documents.all()
+
+        # Serialize and return the documents
+        serializer = DocumentSerializer(case_documents, many=True)
+        return Response(serializer.data)
+
+
+class LawyerRequestsView(APIView):
+    permission_classes = [IsAuthenticated, LawyerRequiredPermission]
+
+    def get(self, request, *args, **kwargs):
+        # Filter requests assigned to the authenticated lawyer
+        lawyer_requests = Request.objects.filter(lawyer_id=request.user.id)
+
+        # Serialize and return the requests
+        serializer = LawyerRequestSerializer(lawyer_requests, many=True)
+        return Response(serializer.data)
